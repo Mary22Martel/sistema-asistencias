@@ -2,83 +2,127 @@ import XLSX from "xlsx";
 import conexion from "../configuracion/basedatos.js";
 import { calcularDescuento } from "../utilidades/calcularDescuentos.js";
 
+const validarFecha = (fecha) => !isNaN(new Date(fecha).getTime());
+
 export const procesarExcel = async (archivoPath) => {
-  const workbook = XLSX.readFile(archivoPath);
-  const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(worksheet);
+  try {
+    const workbook = XLSX.readFile(archivoPath);
+    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+    console.log("🔹 Registros extraídos del Excel:", jsonData); // ✅ Verifica cuántos registros se están obteniendo
+
+    return jsonData.filter(fila => fila["ID de Usuario"] && validarFecha(fila.Tiempo));
+  } catch (error) {
+    throw new Error(`Error al procesar archivo: ${error.message}`);
+  }
 };
 
+
 export const registrarAsistencias = async (datos) => {
-    const resultados = [];
-    const registrosProcesados = new Set(); // Para evitar duplicados
-  
-    for (const fila of datos) {
+  const registrosUnicos = new Set();
+  const resultados = [];
+
+  // **Ordenar registros primero por fecha y hora**
+  const datosOrdenados = [...datos].sort((a, b) => {
+    return new Date(a.Tiempo) - new Date(b.Tiempo);
+  });
+
+  const registrosPorDia = new Map();
+
+  for (const fila of datosOrdenados) {
+    try {
       const usuarioId = fila["ID de Usuario"];
-      const fechaHora = new Date(fila.Tiempo);
-      const horaMarcacion = fechaHora.getHours();
-      const minutosMarcacion = fechaHora.getMinutes();
-      let tipoEvento = "";
+      const fechaHoraRaw = fila.Tiempo;
+      const fechaHora = new Date(fechaHoraRaw);
+
+      if (!usuarioId || isNaN(fechaHora)) {
+        console.log(`Registro inválido: ${JSON.stringify(fila)}`);
+        continue;
+      }
+
+      // **Obtener la fecha sin la hora**
+      const fecha = fechaHora.toISOString().split('T')[0];
+
+      // **Si no hay registros en el día, crear la entrada**
+      if (!registrosPorDia.has(fecha)) {
+        registrosPorDia.set(fecha, []);
+      }
+
+      const registrosDia = registrosPorDia.get(fecha);
+
+      // **Determinar tipo de evento basado en el orden**
+      let tipoEvento = "entrada";
+      if (registrosDia.length > 0) {
+        const ultimoRegistro = registrosDia[registrosDia.length - 1];
+        tipoEvento = ultimoRegistro.tipoEvento === "entrada" ? "salida" : "entrada";
+      }
+
+      // **Determinar turno**
       let turno = "";
-  
-      // 🔹 Verificar si el usuario existe
-      const [usuarioExiste] = await conexion.query(
-        "SELECT id FROM usuarios WHERE id = ?",
-        [usuarioId]
-      );
-  
-      if (usuarioExiste.length === 0) {
-        console.log(`⚠ ERROR: Usuario con ID ${usuarioId} no existe. Omitiendo...`);
-        continue;
-      }
-  
-      // 🔹 Determinar si es entrada o salida correctamente
-      if ((horaMarcacion === 8 && minutosMarcacion >= 30) || (horaMarcacion >= 9 && horaMarcacion < 13)) {
+      const hora = fechaHora.getHours();
+      if (hora < 13 || (hora === 13 && fechaHora.getMinutes() === 0)) {
         turno = "mañana";
-        tipoEvento = "entrada";
-      } else if (horaMarcacion >= 13 && horaMarcacion < 14) {
-        turno = "mañana";
-        tipoEvento = "salida";
-      } else if (horaMarcacion >= 15 && horaMarcacion < 19) {
-        turno = "tarde";
-        tipoEvento = "entrada";
-      } else if (horaMarcacion >= 19) {
-        turno = "tarde";
-        tipoEvento = "salida";
       } else {
-        turno = "mañana";
-        tipoEvento = "salida"; // Fuera de horario laboral
+        turno = "tarde";
       }
-  
-      // 🔹 Evitar registros duplicados en la misma fecha y hora
-      const key = `${usuarioId}-${fila.Tiempo}`;
-      if (registrosProcesados.has(key)) {
-        console.log(`⏩ Registro duplicado para usuario ${usuarioId} en ${fila.Tiempo}, omitiendo...`);
-        continue;
+
+      // **Si la salida es antes de una salida esperada, es salida anticipada**
+      let detalle = "Normal";
+      if (tipoEvento === "salida") {
+        const ultimaEntrada = registrosDia.find(r => r.tipoEvento === "entrada");
+        if (ultimaEntrada && fechaHora < new Date(ultimaEntrada.fechaHora)) {
+          detalle = "Salida anticipada";
+        }
       }
-      registrosProcesados.add(key);
-  
-      // 🔹 Aplicar descuento si es entrada tardía
-      let descuento = 0;
-      if (tipoEvento === "entrada") {
-        descuento = calcularDescuento(fechaHora, turno);
-      }
-  
-      // 🔹 Insertar en la BD
-      await conexion.query(
-        "INSERT INTO asistencias (usuario_id, fecha_hora, tipo_evento, turno, descuento) VALUES (?, ?, ?, ?, ?)",
-        [usuarioId, fila.Tiempo, tipoEvento, turno, descuento]
+
+      // **Control de duplicados**
+      const claveUnica = `${usuarioId}-${fechaHora.toISOString()}-${tipoEvento}-${turno}`;
+      if (registrosUnicos.has(claveUnica)) continue;
+      registrosUnicos.add(claveUnica);
+
+      // **Verificar en la BD si ya existe**
+      const [existente] = await conexion.query(
+        `SELECT id FROM asistencias 
+         WHERE usuario_id = ? 
+         AND fecha_hora = STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s')
+         AND tipo_evento = ?
+         AND turno = ?`,
+        [usuarioId, fechaHoraRaw, tipoEvento, turno]
       );
-  
-      resultados.push({
-        usuario_id: usuarioId,
-        fecha: fila.Tiempo,
-        tipo_evento: tipoEvento,
+
+      if (existente.length > 0) continue;
+
+      // **Calcular descuento solo en entradas**
+      const descuento = tipoEvento === "entrada" ? calcularDescuento(fechaHora, turno) : 0;
+
+      // **Insertar en la BD**
+      await conexion.query(
+        `INSERT INTO asistencias 
+         (usuario_id, fecha_hora, tipo_evento, turno, descuento, detalle)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [usuarioId, fechaHoraRaw, tipoEvento, turno, descuento, detalle]
+      );
+
+      const nuevoRegistro = {
+        usuarioId,
+        fechaHora: fechaHoraRaw,
+        tipoEvento,
         turno,
         descuento,
-      });
+        detalle,
+        fecha
+      };
+
+      registrosDia.push(nuevoRegistro); // Agregar a la lista del día
+      resultados.push(nuevoRegistro);
+
+    } catch (error) {
+      if (error.code !== 'ER_DUP_ENTRY') {
+        console.error(`Error en registro: ${error.message}`);
+      }
     }
-  
-    return resultados;
-  };
-  
-  
+  }
+
+  return resultados;
+};

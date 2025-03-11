@@ -5,65 +5,89 @@ import multer from "multer";
 import conexion from "../configuracion/basedatos.js";
 
 const router = express.Router();
-const subirArchivo = multer({ dest: "uploads/" });
+const upload = multer({ dest: "uploads/" });
 
-router.post("/subir", subirArchivo.single("excel"), async (req, res) => {
+router.post("/subir", upload.single("excel"), async (req, res) => {
   try {
     const datos = await procesarExcel(req.file.path);
     const resultados = await registrarAsistencias(datos);
     fs.unlinkSync(req.file.path);
 
     res.json({
-      mensaje: "Archivo procesado correctamente",
-      datos: resultados,
+      success: true,
+      registros_procesados: resultados.length,
+      detalles: resultados
     });
+
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({
+      success: false,
+      error: "Error en el servidor",
+      detalle: error.message
+    });
   }
 });
 
 router.get("/usuario/:id", async (req, res) => {
   try {
-    // Obtener el usuario con CAST a número
+    // Obtener usuario
     const [usuario] = await conexion.query(
-      "SELECT nombre, CAST(sueldo AS DECIMAL(10,2)) AS sueldo FROM usuarios WHERE id = ?",
+      `SELECT id, nombre, CAST(sueldo AS DECIMAL(10,2)) AS sueldo 
+       FROM usuarios WHERE id = ?`,
       [req.params.id]
     );
 
-    if (!usuario.length) {
-      return res.status(404).json({ error: "Usuario no encontrado" });
-    }
+    if (!usuario.length) return res.status(404).json({ error: "Usuario no encontrado" });
 
-    // Obtener asistencias con descuentos convertidos a número
-    const [asistencias] = await conexion.query(
-      `SELECT DATE(fecha_hora) as fecha, 
-              CAST(COALESCE(descuento, 0) AS DECIMAL(10,2)) as descuento, 
-              turno, 
-              TIME(fecha_hora) as hora_entrada
+    // Obtener registros ORDENADOS
+    const [registros] = await conexion.query(
+      `SELECT 
+          fecha_hora,
+          tipo_evento,
+          turno,
+          CAST(descuento AS DECIMAL(10,2)) AS descuento,
+          COALESCE(detalle, 'Sin detalles') AS detalle  -- ✅ Asegurar que detalle nunca sea NULL
        FROM asistencias 
-       WHERE usuario_id = ? 
-       ORDER BY fecha_hora ASC`,
+       WHERE usuario_id = ?
+       ORDER BY fecha_hora ASC`, 
       [req.params.id]
     );
 
-    // Si el usuario no tiene asistencias, evitar cálculos incorrectos
-    const totalDescuentos = asistencias.reduce((acc, dia) => acc + parseFloat(dia.descuento), 0);
+    console.log("🔹 Registros enviados al frontend:", registros); // ✅ Verificar en consola que los detalles estén presentes
 
-    // Convertir sueldo a número y calcular sueldo neto
-    const sueldoBase = parseFloat(usuario[0].sueldo);
-    const sueldoNeto = sueldoBase - totalDescuentos;
+    const diasMap = new Map();
+    
+    registros.forEach(registro => {
+      const fecha = new Date(registro.fecha_hora).toISOString().split('T')[0];
+      if (!diasMap.has(fecha)) {
+        diasMap.set(fecha, {
+          fecha,
+          registros: [],
+          total_descuento: 0
+        });
+      }
+      
+      const dia = diasMap.get(fecha);
+      dia.registros.push({
+        ...registro,
+        hora: new Date(registro.fecha_hora).toLocaleTimeString('es-PE')
+      });
+      dia.total_descuento += parseFloat(registro.descuento);
+    });
 
     res.json({
       usuario: {
-        nombre: usuario[0].nombre,
-        sueldo_base: sueldoBase,
-        sueldo_neto: sueldoNeto,
+        ...usuario[0],
+        sueldo: parseFloat(usuario[0].sueldo),
+        total_descuento: Array.from(diasMap.values()).reduce((acc, dia) => acc + dia.total_descuento, 0)
       },
-      asistencias,
+      dias: Array.from(diasMap.values())
     });
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 export default router;
