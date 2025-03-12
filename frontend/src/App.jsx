@@ -11,9 +11,7 @@ function App() {
     <div className="main-container">
       {/* Sección para subir el archivo */}
       <section className="upload-section">
-        <h1>🏢 Sistema de Gestión de      Asistencias</h1>
-        <br></br>
-        <p>asistencias</p>
+        <h1>🏢 Sistema de Gestión de Asistencias</h1>
         <div className="card">
           <SubirExcel setResultados={setResultados} />
         </div>
