@@ -1,91 +1,104 @@
 import moment from 'moment';
 
-// Configuración del horario laboral
-const HORARIO_MANANA = { inicio: "08:30", tolerancia: "08:38", descuento_1: "08:39", descuento_2: "09:31", ausencia: "10:31" };
-const HORARIO_TARDE = { inicio: "15:00", tolerancia: "15:08", descuento_1: "15:09", descuento_2: "16:31", ausencia: "17:31" };
-const HORARIO_SABADO = { inicio: "08:30", tolerancia: "08:38", descuento_1: "08:39", descuento_2: "09:31", ausencia: "10:31" };
+const HORARIO = {
+    mañana: { inicio: "08:30", tolerancia: "08:38", tardanza1: "08:39", tardanza2: "09:31", ausencia: "10:31" },
+    tarde: { inicio: "15:00", tolerancia: "15:08", tardanza1: "15:09", tardanza2: "16:31", ausencia: "17:31" }
+};
 
-// Descuentos monetarios
-const DESCUENTO_1 = 5;  // 8:39 - 9:30 (mañana) | 15:09 - 16:30 (tarde)
-const DESCUENTO_2 = 10; // 9:31 - 10:30 (mañana) | 16:31 - 17:30 (tarde)
+const DIAS_LABORALES = 30;
 
-// Salario base y cálculo por día
-const SALARIO_MENSUAL = 1500;
-const DIAS_LABORALES = 30; // Ajustar según sea necesario
-const SALARIO_DIARIO = SALARIO_MENSUAL / DIAS_LABORALES;
-const DESCUENTO_AUSENCIA = SALARIO_DIARIO / 2; // Mitad del día
-
-function procesarAsistencias(registros, fechaInicio, fechaFin) {
+function procesarAsistencias(registros, fechaInicio, fechaFin, idUsuario, salarioMensual) {
     const asistencias = {};
+    const salarioDiario = salarioMensual / DIAS_LABORALES;
+    const descuentoMediaJornada = salarioDiario / 2;
+    let totalDescuento = 0;
 
-    registros.forEach(registro => {
-        let [fecha, hora] = registro.tiempo.split(" ");
-        let idUsuario = registro.idUsuario;
-        
-        if (!asistencias[idUsuario]) asistencias[idUsuario] = {};
+    registros.forEach((registro, index) => {
+        if (!registro.Tiempo || typeof registro.Tiempo !== 'string') {
+            console.warn(`⚠ Registro inválido en fila ${index + 1}:`, registro);
+            return;
+        }
 
-        if (!asistencias[idUsuario][fecha]) {
-            asistencias[idUsuario][fecha] = {
-                entradas: [],
-                salidas: [],
-                descuentos: 0,
-                ausencia: false,
-                detalles: [],
+        let fechaHora = moment(registro.Tiempo, ["YYYY-MM-DD HH:mm:ss", "DD/MM/YYYY HH:mm:ss", "D/MM/YYYY HH:mm:ss"], true);
+        if (!fechaHora.isValid()) {
+            console.warn(`⚠ Formato incorrecto en fila ${index + 1}:`, registro.Tiempo);
+            return;
+        }
+
+        const fecha = fechaHora.format("YYYY-MM-DD");
+        const hora = fechaHora.format("HH:mm:ss");
+
+        if (registro["ID de Usuario"] != idUsuario || moment(fecha).isBefore(fechaInicio) || moment(fecha).isAfter(fechaFin)) return;
+
+        if (!asistencias[fecha]) {
+            asistencias[fecha] = { 
+                mañana: null, tarde: null, descuento: 0, 
+                estadoM: "Presente", estadoT: "Presente",
+                detalles: [] 
             };
         }
 
-        let horaMomento = moment(hora, "HH:mm:ss");
-        let diaSemana = moment(fecha).isoWeekday(); // 1 = lunes, 7 = domingo
-        let horario = (diaSemana === 6) ? HORARIO_SABADO : HORARIO_MANANA;
-        let horarioTarde = HORARIO_TARDE;
+        const horaMomento = moment(hora, "HH:mm:ss");
 
-        // Determinar si es entrada o salida
-        if (horaMomento.isBefore(moment(horario.inicio, "HH:mm"))) {
-            asistencias[idUsuario][fecha].entradas.push(hora);
-        } else if (horaMomento.isBetween(moment(horario.inicio, "HH:mm"), moment("14:00", "HH:mm"))) {
-            asistencias[idUsuario][fecha].entradas.push(hora);
-        } else {
-            asistencias[idUsuario][fecha].salidas.push(hora);
+        // ✅ 🔥 **CORRECCIÓN: Aceptar registros de la tarde a partir de las 14:55**
+        if (horaMomento.isBetween(moment("14:55", "HH:mm"), moment(HORARIO.tarde.ausencia, "HH:mm"), null, "[)")) {
+            asistencias[fecha].tarde = hora;
+        } else if (horaMomento.isBetween(moment(HORARIO.mañana.inicio, "HH:mm"), moment(HORARIO.mañana.ausencia, "HH:mm"), null, "[)")) {
+            asistencias[fecha].mañana = hora;
         }
     });
 
-    // Aplicar lógica de descuentos
-    Object.keys(asistencias).forEach(idUsuario => {
-        Object.keys(asistencias[idUsuario]).forEach(fecha => {
-            let asistencia = asistencias[idUsuario][fecha];
-            let entradas = asistencia.entradas.sort();
-            let salidas = asistencia.salidas.sort();
+    Object.keys(asistencias).forEach(fecha => {
+        const asistencia = asistencias[fecha];
 
-            if (entradas.length > 0) {
-                let entradaMañana = moment(entradas[0], "HH:mm:ss");
-                let horario = HORARIO_MANANA;
-                
-                if (entradaMañana.isAfter(moment(horario.tolerancia, "HH:mm"))) {
-                    if (entradaMañana.isBetween(moment(horario.descuento_1, "HH:mm"), moment(horario.descuento_2, "HH:mm"))) {
-                        asistencia.descuentos += DESCUENTO_1;
-                        asistencia.detalles.push(`Llegó tarde (${entradaMañana.format("HH:mm")}), descuento de S/. ${DESCUENTO_1}`);
-                    } else if (entradaMañana.isAfter(moment(horario.descuento_2, "HH:mm"))) {
-                        asistencia.descuentos += DESCUENTO_2;
-                        asistencia.detalles.push(`Llegó muy tarde (${entradaMañana.format("HH:mm")}), descuento de S/. ${DESCUENTO_2}`);
-                    }
-                }
-            } else {
-                asistencia.ausencia = true;
-                asistencia.descuentos += DESCUENTO_AUSENCIA;
-                asistencia.detalles.push(`Ausencia en la mañana, descuento de S/. ${DESCUENTO_AUSENCIA}`);
+        // 📌 Verificación de la mañana
+        if (!asistencia.mañana) {
+            asistencia.estadoM = "Ausente";
+            asistencia.descuento += descuentoMediaJornada;
+            asistencia.detalles.push(`Ausente en la mañana - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`);
+        } else {
+            const entradaMañana = moment(asistencia.mañana, "HH:mm:ss");
+            if (entradaMañana.isBetween(moment(HORARIO.mañana.tardanza1, "HH:mm"), moment(HORARIO.mañana.tardanza2, "HH:mm"))) {
+                asistencia.estadoM = "Tardanza";
+                asistencia.descuento += 5;
+                asistencia.detalles.push(`Llegó tarde en la mañana (${asistencia.mañana}) - Descuento S/. 5.00`);
+            } else if (entradaMañana.isBetween(moment(HORARIO.mañana.tardanza2, "HH:mm"), moment(HORARIO.mañana.ausencia, "HH:mm"))) {
+                asistencia.estadoM = "Tardanza grave";
+                asistencia.descuento += 10;
+                asistencia.detalles.push(`Llegó muy tarde en la mañana (${asistencia.mañana}) - Descuento S/. 10.00`);
+            } else if (entradaMañana.isAfter(moment(HORARIO.mañana.ausencia, "HH:mm"))) {
+                asistencia.estadoM = "Ausente";
+                asistencia.descuento += descuentoMediaJornada;
+                asistencia.detalles.push(`Llegó demasiado tarde (${asistencia.mañana}) - Se considera ausente en la mañana - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`);
             }
+        }
 
-            if (salidas.length > 0) {
-                let salidaMañana = moment(salidas[0], "HH:mm:ss");
-                if (salidaMañana.isBefore(moment("12:30", "HH:mm"))) {
-                    let minutosAntes = moment.duration(moment("12:30", "HH:mm").diff(salidaMañana)).asMinutes();
-                    asistencia.detalles.push(`Salió temprano (${salidaMañana.format("HH:mm")}), ${minutosAntes} minutos antes.`);
-                }
+        // 📌 Verificación de la tarde
+        if (!asistencia.tarde) {
+            asistencia.estadoT = "Ausente";
+            asistencia.descuento += descuentoMediaJornada;
+            asistencia.detalles.push(`Ausente en la tarde - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`);
+        } else {
+            const entradaTarde = moment(asistencia.tarde, "HH:mm:ss");
+            if (entradaTarde.isBetween(moment(HORARIO.tarde.tardanza1, "HH:mm"), moment(HORARIO.tarde.tardanza2, "HH:mm"))) {
+                asistencia.estadoT = "Tardanza";
+                asistencia.descuento += 5;
+                asistencia.detalles.push(`Llegó tarde en la tarde (${asistencia.tarde}) - Descuento S/. 5.00`);
+            } else if (entradaTarde.isBetween(moment(HORARIO.tarde.tardanza2, "HH:mm"), moment(HORARIO.tarde.ausencia, "HH:mm"))) {
+                asistencia.estadoT = "Tardanza grave";
+                asistencia.descuento += 10;
+                asistencia.detalles.push(`Llegó muy tarde en la tarde (${asistencia.tarde}) - Descuento S/. 10.00`);
+            } else if (entradaTarde.isAfter(moment(HORARIO.tarde.ausencia, "HH:mm"))) {
+                asistencia.estadoT = "Ausente";
+                asistencia.descuento += descuentoMediaJornada;
+                asistencia.detalles.push(`Llegó demasiado tarde (${asistencia.tarde}) - Se considera ausente en la tarde - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`);
             }
-        });
+        }
+
+        totalDescuento += asistencia.descuento;
     });
 
-    return asistencias;
+    return { asistencias, totalPagar: salarioMensual - totalDescuento };
 }
 
 export { procesarAsistencias };

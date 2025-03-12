@@ -1,128 +1,91 @@
-import XLSX from "xlsx";
-import conexion from "../configuracion/basedatos.js";
-import { calcularDescuento } from "../utilidades/calcularDescuentos.js";
+import moment from 'moment';
 
-const validarFecha = (fecha) => !isNaN(new Date(fecha).getTime());
-
-export const procesarExcel = async (archivoPath) => {
-  try {
-    const workbook = XLSX.readFile(archivoPath);
-    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-    const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
-    console.log("🔹 Registros extraídos del Excel:", jsonData); // ✅ Verifica cuántos registros se están obteniendo
-
-    return jsonData.filter(fila => fila["ID de Usuario"] && validarFecha(fila.Tiempo));
-  } catch (error) {
-    throw new Error(`Error al procesar archivo: ${error.message}`);
-  }
+const HORARIO = {
+    mañana: { inicio: "08:30", tolerancia: "08:38", tardanza1: "08:39", tardanza2: "09:31", ausencia: "10:31" },
+    tarde: { inicio: "15:00", tolerancia: "15:08", tardanza1: "15:09", tardanza2: "16:31", ausencia: "17:31" }
 };
 
+const DIAS_LABORALES = 30;
 
-export const registrarAsistencias = async (datos) => {
-  const registrosUnicos = new Set();
-  const resultados = [];
+function procesarAsistencias(registros, fechaInicio, fechaFin, idUsuario, salarioMensual) {
+    const asistencias = {};
+    const salarioDiario = salarioMensual / DIAS_LABORALES;
+    const descuentoPorHora = salarioDiario / 8;
+    const descuentoMediaJornada = salarioDiario / 2;
+    let totalDescuento = 0;
 
-  // **Ordenar registros primero por fecha y hora**
-  const datosOrdenados = [...datos].sort((a, b) => {
-    return new Date(a.Tiempo) - new Date(b.Tiempo);
-  });
+    registros.forEach(registro => {
+        const [fecha, hora] = registro.Tiempo.split(" ");
+        if (registro["ID de Usuario"] != idUsuario || moment(fecha).isBefore(fechaInicio) || moment(fecha).isAfter(fechaFin)) return;
 
-  const registrosPorDia = new Map();
-
-  for (const fila of datosOrdenados) {
-    try {
-      const usuarioId = fila["ID de Usuario"];
-      const fechaHoraRaw = fila.Tiempo;
-      const fechaHora = new Date(fechaHoraRaw);
-
-      if (!usuarioId || isNaN(fechaHora)) {
-        console.log(`Registro inválido: ${JSON.stringify(fila)}`);
-        continue;
-      }
-
-      // **Obtener la fecha sin la hora**
-      const fecha = fechaHora.toISOString().split('T')[0];
-
-      // **Si no hay registros en el día, crear la entrada**
-      if (!registrosPorDia.has(fecha)) {
-        registrosPorDia.set(fecha, []);
-      }
-
-      const registrosDia = registrosPorDia.get(fecha);
-
-      // **Determinar tipo de evento basado en el orden**
-      let tipoEvento = "entrada";
-      if (registrosDia.length > 0) {
-        const ultimoRegistro = registrosDia[registrosDia.length - 1];
-        tipoEvento = ultimoRegistro.tipoEvento === "entrada" ? "salida" : "entrada";
-      }
-
-      // **Determinar turno**
-      let turno = "";
-      const hora = fechaHora.getHours();
-      if (hora < 13 || (hora === 13 && fechaHora.getMinutes() === 0)) {
-        turno = "mañana";
-      } else {
-        turno = "tarde";
-      }
-
-      // **Si la salida es antes de una salida esperada, es salida anticipada**
-      let detalle = "Normal";
-      if (tipoEvento === "salida") {
-        const ultimaEntrada = registrosDia.find(r => r.tipoEvento === "entrada");
-        if (ultimaEntrada && fechaHora < new Date(ultimaEntrada.fechaHora)) {
-          detalle = "Salida anticipada";
+        if (!asistencias[fecha]) {
+            asistencias[fecha] = { 
+                mañana: null, tarde: null, descuento: 0, 
+                estadoM: "Presente", estadoT: "Presente",
+                detalles: [] 
+            };
         }
-      }
 
-      // **Control de duplicados**
-      const claveUnica = `${usuarioId}-${fechaHora.toISOString()}-${tipoEvento}-${turno}`;
-      if (registrosUnicos.has(claveUnica)) continue;
-      registrosUnicos.add(claveUnica);
+        const horaMomento = moment(hora, "HH:mm:ss");
 
-      // **Verificar en la BD si ya existe**
-      const [existente] = await conexion.query(
-        `SELECT id FROM asistencias 
-         WHERE usuario_id = ? 
-         AND fecha_hora = STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s')
-         AND tipo_evento = ?
-         AND turno = ?`,
-        [usuarioId, fechaHoraRaw, tipoEvento, turno]
-      );
+        if (horaMomento.isBetween(moment(HORARIO.mañana.inicio, "HH:mm"), moment(HORARIO.mañana.ausencia, "HH:mm"))) {
+            asistencias[fecha].mañana = hora;
+        } else if (horaMomento.isBetween(moment(HORARIO.tarde.inicio, "HH:mm"), moment(HORARIO.tarde.ausencia, "HH:mm"))) {
+            asistencias[fecha].tarde = hora;
+        }
+    });
 
-      if (existente.length > 0) continue;
+    Object.keys(asistencias).forEach(fecha => {
+        const asistencia = asistencias[fecha];
 
-      // **Calcular descuento solo en entradas**
-      const descuento = tipoEvento === "entrada" ? calcularDescuento(fechaHora, turno) : 0;
+        // 📌 Verificación de la mañana
+        if (!asistencia.mañana) {
+            asistencia.estadoM = "Ausente";
+            asistencia.descuento += descuentoMediaJornada;
+            asistencia.detalles.push(`Ausente en la mañana - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`);
+        } else {
+            const entradaMañana = moment(asistencia.mañana, "HH:mm:ss");
+            if (entradaMañana.isBetween(moment(HORARIO.mañana.tardanza1, "HH:mm"), moment(HORARIO.mañana.tardanza2, "HH:mm"))) {
+                asistencia.estadoM = "Tardanza";
+                asistencia.descuento += 5;
+                asistencia.detalles.push(`Llegó tarde en la mañana (${asistencia.mañana}) - Descuento S/. 5.00`);
+            } else if (entradaMañana.isAfter(moment(HORARIO.mañana.tardanza2, "HH:mm"))) {
+                asistencia.estadoM = "Tardanza grave";
+                asistencia.descuento += 10;
+                asistencia.detalles.push(`Llegó muy tarde en la mañana (${asistencia.mañana}) - Descuento S/. 10.00`);
+            } else if (entradaMañana.isAfter(moment(HORARIO.mañana.ausencia, "HH:mm"))) {
+                asistencia.estadoM = "Ausente";
+                asistencia.descuento += descuentoMediaJornada;
+                asistencia.detalles.push(`Llegó demasiado tarde (${asistencia.mañana}) - Se considera ausente en la mañana - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`);
+            }
+        }
 
-      // **Insertar en la BD**
-      await conexion.query(
-        `INSERT INTO asistencias 
-         (usuario_id, fecha_hora, tipo_evento, turno, descuento, detalle)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [usuarioId, fechaHoraRaw, tipoEvento, turno, descuento, detalle]
-      );
+        // 📌 Verificación de la tarde
+        if (!asistencia.tarde) {
+            asistencia.estadoT = "Ausente";
+            asistencia.descuento += descuentoMediaJornada;
+            asistencia.detalles.push(`Ausente en la tarde - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`);
+        } else {
+            const entradaTarde = moment(asistencia.tarde, "HH:mm:ss");
+            if (entradaTarde.isBetween(moment(HORARIO.tarde.tardanza1, "HH:mm"), moment(HORARIO.tarde.tardanza2, "HH:mm"))) {
+                asistencia.estadoT = "Tardanza";
+                asistencia.descuento += 5;
+                asistencia.detalles.push(`Llegó tarde en la tarde (${asistencia.tarde}) - Descuento S/. 5.00`);
+            } else if (entradaTarde.isAfter(moment(HORARIO.tarde.tardanza2, "HH:mm"))) {
+                asistencia.estadoT = "Tardanza grave";
+                asistencia.descuento += 10;
+                asistencia.detalles.push(`Llegó muy tarde en la tarde (${asistencia.tarde}) - Descuento S/. 10.00`);
+            } else if (entradaTarde.isAfter(moment(HORARIO.tarde.ausencia, "HH:mm"))) {
+                asistencia.estadoT = "Ausente";
+                asistencia.descuento += descuentoMediaJornada;
+                asistencia.detalles.push(`Llegó demasiado tarde (${asistencia.tarde}) - Se considera ausente en la tarde - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`);
+            }
+        }
 
-      const nuevoRegistro = {
-        usuarioId,
-        fechaHora: fechaHoraRaw,
-        tipoEvento,
-        turno,
-        descuento,
-        detalle,
-        fecha
-      };
+        totalDescuento += asistencia.descuento;
+    });
 
-      registrosDia.push(nuevoRegistro); // Agregar a la lista del día
-      resultados.push(nuevoRegistro);
+    return { asistencias, totalPagar: salarioMensual - totalDescuento };
+}
 
-    } catch (error) {
-      if (error.code !== 'ER_DUP_ENTRY') {
-        console.error(`Error en registro: ${error.message}`);
-      }
-    }
-  }
-
-  return resultados;
-};
+export { procesarAsistencias };
