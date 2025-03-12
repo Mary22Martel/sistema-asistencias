@@ -1,6 +1,7 @@
 import xlsx from 'xlsx';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import moment from 'moment'; // Importar moment aquí
 
 // Convertir import.meta.url en __dirname (compatible con ES Modules)
 const __filename = fileURLToPath(import.meta.url);
