@@ -43,7 +43,7 @@ export function leerExcel(rutaArchivo, idUsuario) {
 }
 
 // Ruta del archivo Excel (ajústala según tu entorno)
-const rutaArchivo = path.join(__dirname, '../../uploads/hoy.xls');
+// const rutaArchivo = path.join(__dirname, '../../uploads/hoy.xls');
 
 // Prueba con ID de usuario 2
-console.log(leerExcel(rutaArchivo, 2));
+// console.log(leerExcel(rutaArchivo, 2));
