@@ -3,26 +3,33 @@ import { useState } from 'react';
 import { FaUpload, FaUser, FaDollarSign, FaCalendarAlt } from 'react-icons/fa';
 import '../App.css'; // Asegúrate de importar los estilos globales
 
-const SubirExcel = ({ setResultados }) => {
+const SubirExcel = ({
+  setResultados,
+  setIdUsuario,
+  setSalario,
+  setFechaInicio,
+  setFechaFin
+}) => {
   const [archivo, setArchivo] = useState(null);
-  const [idUsuario, setIdUsuario] = useState('');
-  const [salario, setSalario] = useState('');
-  const [fechaInicio, setFechaInicio] = useState('');
-  const [fechaFin, setFechaFin] = useState('');
+  const [localIdUsuario, setLocalIdUsuario] = useState('');
+  const [localSalario, setLocalSalario] = useState('');
+  const [localFechaInicio, setLocalFechaInicio] = useState('');
+  const [localFechaFin, setLocalFechaFin] = useState('');
   const [error, setError] = useState('');
 
   const subirArchivo = async () => {
-    if (!archivo || !idUsuario || !salario || !fechaInicio || !fechaFin) {
+    // Validación de todos los campos
+    if (!archivo || !localIdUsuario || !localSalario || !localFechaInicio || !localFechaFin) {
       setError('Por favor, completa todos los campos y selecciona un archivo.');
       return;
     }
 
     const formData = new FormData();
     formData.append('archivo', archivo);
-    formData.append('idUsuario', idUsuario);
-    formData.append('salario', salario);
-    formData.append('fechaInicio', fechaInicio);
-    formData.append('fechaFin', fechaFin);
+    formData.append('idUsuario', localIdUsuario);
+    formData.append('salario', localSalario);
+    formData.append('fechaInicio', localFechaInicio);
+    formData.append('fechaFin', localFechaFin);
 
     try {
       const response = await fetch('http://localhost:4000/api/upload/subir-excel', {
@@ -31,6 +38,13 @@ const SubirExcel = ({ setResultados }) => {
       });
 
       const data = await response.json();
+
+      // Actualizamos los estados en el componente padre
+      setIdUsuario(localIdUsuario);
+      setSalario(localSalario);
+      setFechaInicio(localFechaInicio);
+      setFechaFin(localFechaFin);
+      
       setResultados(data);
       setError('');
     } catch (err) {
@@ -62,8 +76,8 @@ const SubirExcel = ({ setResultados }) => {
           <input
             type="text"
             placeholder="ID del Usuario"
-            value={idUsuario}
-            onChange={(e) => setIdUsuario(e.target.value)}
+            value={localIdUsuario}
+            onChange={(e) => setLocalIdUsuario(e.target.value)}
             style={{
               flex: 1,
               padding: '0.5rem',
@@ -78,8 +92,8 @@ const SubirExcel = ({ setResultados }) => {
           <input
             type="number"
             placeholder="Salario Mensual"
-            value={salario}
-            onChange={(e) => setSalario(e.target.value)}
+            value={localSalario}
+            onChange={(e) => setLocalSalario(e.target.value)}
             style={{
               flex: 1,
               padding: '0.5rem',
@@ -94,8 +108,8 @@ const SubirExcel = ({ setResultados }) => {
           <FaCalendarAlt style={{ color: '#0d3b66' }} />
           <input
             type="date"
-            value={fechaInicio}
-            onChange={(e) => setFechaInicio(e.target.value)}
+            value={localFechaInicio}
+            onChange={(e) => setLocalFechaInicio(e.target.value)}
             style={{
               flex: 1,
               padding: '0.5rem',
@@ -109,8 +123,8 @@ const SubirExcel = ({ setResultados }) => {
           <FaCalendarAlt style={{ color: '#0d3b66' }} />
           <input
             type="date"
-            value={fechaFin}
-            onChange={(e) => setFechaFin(e.target.value)}
+            value={localFechaFin}
+            onChange={(e) => setLocalFechaFin(e.target.value)}
             style={{
               flex: 1,
               padding: '0.5rem',

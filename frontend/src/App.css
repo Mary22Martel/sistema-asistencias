@@ -20,7 +20,7 @@ body {
 /* Contenedor principal */
 .main-container {
   width: 100%;
-  max-width: 1200px;
+  max-width: 1600px;
   padding: 2rem 1rem;
   display: flex;
   flex-direction: column;
@@ -39,7 +39,7 @@ body {
 /* Tarjeta para subir archivos */
 .upload-card {
   width: 100%;
-  max-width: 600px;
+  max-width: 1000px;
   background-color: #fff;
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
@@ -128,7 +128,7 @@ body {
 /* Tarjeta de resultados */
 .results-card {
   width: 100%;
-  max-width: 1200px;
+  max-width: 1600px;
   background-color: #fff;
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
@@ -136,4 +136,33 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+/* Aumenta el tamaño del calendario */
+.react-calendar {
+  width: 1000px !important;   /* O el valor que desees */
+  height: 600px !important;  /* Ajusta para que sea más "rectangular" */
+  max-width: 100%;           /* Para que en pantallas pequeñas no se descuadre */
+  font-size: 1rem !important; /* Ajusta el tamaño de letra */
+}
+
+/* Días fuera de rango (plomito) */
+.tile-out-of-range {
+  background-color: #eaeaea !important;
+  color: #999;
+}
+
+/* Ausente */
+.tile-ausente {
+  background-color: #ffe0e0 !important; /* rojo clarito */
+}
+
+/* Tardanza */
+.tile-tardanza {
+  background-color: #fff5b8 !important; /* amarillo clarito */
+}
+
+/* Descanso (domingo) */
+.tile-descanso {
+  background-color: #dddddd !important; /* gris */
 }
