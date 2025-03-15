@@ -3,6 +3,8 @@ import React from 'react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import moment from 'moment';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 function estaFueraDeRango(dateStr, fechaInicio, fechaFin) {
   const d = moment(dateStr, "YYYY-MM-DD");
@@ -28,13 +30,13 @@ const AsistenciaCalendar = ({
 
       const info = asistenciasGlobal[dateStr];
       if (!info) {
-        // En teoría no pasa, pero lo dejamos por seguridad
         return <div style={{ fontSize: '0.65em', color: 'red' }}>¿Sin datos?</div>;
       }
 
       return (
         <div style={{ fontSize: '0.65em', textAlign: 'left' }}>
-          <strong>{info.estadoM}</strong> / <strong>{info.estadoT}</strong><br />
+          <strong>{info.estadoM}</strong> / <strong>{info.estadoT}</strong>
+          <br />
           {info.descuento > 0 && (
             <span style={{ color: 'red' }}>
               Desc: S/. {info.descuento.toFixed(2)}
@@ -62,24 +64,51 @@ const AsistenciaCalendar = ({
       if (info.estadoM === 'Ausente' && info.estadoT === 'Ausente') {
         return 'tile-ausente';
       }
-      // etc. para tardanza...
+      // Puedes agregar más condiciones según tus necesidades
     }
     return '';
   };
 
+  // Función para exportar el calendario a PDF
+  const exportToPDF = () => {
+    const calendarElement = document.getElementById("calendar");
+    if (!calendarElement) return;
+
+    html2canvas(calendarElement)
+      .then((canvas) => {
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF('landscape');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+        pdf.save('calendario-asistencias.pdf');
+      })
+      .catch((error) => {
+        console.error("Error exportando el PDF:", error);
+      });
+  };
+
   return (
     <div>
-      <h2>Calendario de Asistencia</h2>
+      <h2 style={{ textAlign: 'center' }}>Calendario de Asistencia</h2>
 
-      <Calendar
-        defaultActiveStartDate={fechaInicio ? new Date(fechaInicio) : new Date()}
-        tileContent={tileContent}
-        tileClassName={tileClassName}
-      />
+      {/* Contenedor del calendario para capturarlo */}
+      <div id="calendar">
+        <Calendar
+          defaultActiveStartDate={fechaInicio ? new Date(fechaInicio) : new Date()}
+          tileContent={tileContent}
+          tileClassName={tileClassName}
+        />
+      </div>
+
       <div style={{ marginTop: '1rem', fontSize: '1.2rem', textAlign: 'center' }}>
         <strong>Total a pagar:</strong> S/. {totalPagarGlobal.toFixed(2)}
       </div>
 
+      {/* Botón para exportar a PDF */}
+      <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+        <button onClick={exportToPDF}>Exportar Calendario a PDF</button>
+      </div>
     </div>
   );
 };
