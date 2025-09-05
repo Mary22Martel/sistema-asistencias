@@ -1,8 +1,8 @@
+// src/componentes/ExcelViewer.jsx
 import React, { useEffect } from 'react';
 import { completarDiasFaltantes } from '../../../backend/src/utilidades/completarCalendario.js';
-import '../ExcelViewer.css'; // Importa el archivo CSS
+import '../ExcelViewer.css';
 import * as XLSX from 'xlsx';
-
 import { saveAs } from 'file-saver';
 
 const ExcelViewer = ({
@@ -12,31 +12,31 @@ const ExcelViewer = ({
   salarioMensual,
   asistenciasGlobal,
   setAsistenciasGlobal,
-  totalPagarGlobal,
-  setTotalPagarGlobal
+  baseTotal,
+  setBaseTotal
 }) => {
   useEffect(() => {
-    // 1) Verificamos que tengamos data y fechas válidas
+    // Verificamos que haya data y fechas válidas
     if (
       resultados && resultados.asistencias &&
       fechaInicio && fechaFin &&
       fechaInicio.trim() !== '' && fechaFin.trim() !== ''
     ) {
-      // 2) Llamar a completarDiasFaltantes
+      // 1) completarDiasFaltantes
       const respuesta = completarDiasFaltantes(
         resultados.asistencias,  // asistencias parciales
         fechaInicio,
         fechaFin,
         salarioMensual,
-        30  // Días laborales en el mes
+        30  // Días laborales
       );
 
-      // 3) Calcular nuevo total
+      // 2) Calculamos el total base (sin dominical)
       const totalConAusencias = parseFloat(salarioMensual) - respuesta.totalDescuentoFinal;
 
-      // 4) Actualizar estados globales para que calendario y tabla vean la misma info
+      // 3) Actualizar asistencias y baseTotal
       setAsistenciasGlobal(respuesta.asistencias);
-      setTotalPagarGlobal(totalConAusencias);
+      setBaseTotal(totalConAusencias);
     }
   }, [
     resultados,
@@ -44,7 +44,7 @@ const ExcelViewer = ({
     fechaFin,
     salarioMensual,
     setAsistenciasGlobal,
-    setTotalPagarGlobal
+    setBaseTotal
   ]);
 
   // Función para exportar a Excel
@@ -79,7 +79,7 @@ const ExcelViewer = ({
       </h2>
       <br />
 
-      {/* Mostrar la tabla con las asistencias (ya completadas) */}
+      {/* Tabla de asistencias */}
       <div className="table-responsive">
         <table className="my-table">
           <thead>
@@ -124,8 +124,9 @@ const ExcelViewer = ({
 
       <hr style={{ margin: "20px 0" }} />
 
-      <h3 className="total-a-pagar" style={{ textAlign: "center" }}>
-        Total a pagar: S/. {totalPagarGlobal.toFixed(2)}
+      {/* Mostramos el baseTotal aquí si quieres */}
+      <h3 style={{ textAlign: "center" }}>
+        Base sin Dominical: S/. {baseTotal.toFixed(2)}
       </h3>
 
       {/* Botón para exportar a Excel */}

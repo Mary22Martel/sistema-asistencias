@@ -132,6 +132,7 @@ function procesarAsistencias(registros, fechaInicio, fechaFin, idUsuario, salari
   // 3) Evaluar tardanzas, ausencias parciales y salidas anticipadas
   Object.keys(asistencias).forEach(fecha => {
     const asistencia = asistencias[fecha];
+    const diaSemana = moment(fecha, "YYYY-MM-DD").day(); // 6 = sábado
 
     // A) Evaluación de la entrada en la mañana
     if (!asistencia.mañana) {
@@ -215,80 +216,87 @@ function procesarAsistencias(registros, fechaInicio, fechaFin, idUsuario, salari
       }
     }
 
-    // C) Evaluación de la entrada en la tarde
-    if (!asistencia.tarde) {
-      asistencia.estadoT = "Ausente";
-      asistencia.descuento += descuentoMediaJornada;
-      asistencia.detalles.push(
-        `Ausente en la tarde - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`
-      );
+    // Si es sábado, solo se trabaja en la mañana
+    if (diaSemana === 6) {
+      asistencia.tarde = "No aplica";
+      asistencia.salidaTarde = "No aplica";
+      asistencia.estadoT = "No aplica";
     } else {
-      const entradaTarde = moment(asistencia.tarde, "HH:mm:ss");
-      // Si la primera marcación en la tarde es después de las 19:00, se considera presente
-      if (entradaTarde.isAfter(moment("19:00", "HH:mm"))) {
-        asistencia.estadoT = "Presente";
-        asistencia.detalles.push(
-          `Marcación en la tarde posterior a las 19:00 (${asistencia.tarde}) - Se consideró Presente`
-        );
-      }
-      // Dentro de tolerancia: sin penalidad
-      else if (entradaTarde.isSameOrBefore(moment(HORARIO.tarde.tolerancia, "HH:mm"))) {
-        // A tiempo, sin descuento
-      }
-      // Primera tardanza: entre 15:09 y 16:29
-      else if (
-        entradaTarde.isBetween(
-          moment(HORARIO.tarde.tardanza1Inicio, "HH:mm"),
-          moment(HORARIO.tarde.tardanza1Fin, "HH:mm"),
-          null,
-          "[]"
-        )
-      ) {
-        asistencia.estadoT = "Tardanza";
-        asistencia.descuento += 5;
-        asistencia.detalles.push(
-          `Llegó tarde en la tarde (${asistencia.tarde}) - Descuento S/. 5.00`
-        );
-      }
-      // Segunda tardanza: entre 16:30 y 17:30
-      else if (
-        entradaTarde.isBetween(
-          moment(HORARIO.tarde.tardanza2Inicio, "HH:mm"),
-          moment(HORARIO.tarde.tardanza2Fin, "HH:mm"),
-          null,
-          "[]"
-        )
-      ) {
-        asistencia.estadoT = "Tardanza grave";
-        asistencia.descuento += 10;
-        asistencia.detalles.push(
-          `Llegó muy tarde en la tarde (${asistencia.tarde}) - Descuento S/. 10.00`
-        );
-      }
-      // Si llega a las 17:31 o más, se marca como ausente
-      else if (
-        entradaTarde.isSameOrAfter(moment(HORARIO.tarde.ausencia, "HH:mm"))
-      ) {
+      // C) Evaluación de la entrada en la tarde
+      if (!asistencia.tarde) {
         asistencia.estadoT = "Ausente";
         asistencia.descuento += descuentoMediaJornada;
         asistencia.detalles.push(
-          `Llegó después de las ${HORARIO.tarde.ausencia} (${asistencia.tarde}) - Se consideró Ausente - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`
+          `Ausente en la tarde - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`
         );
-      }
-    }
-
-    // D) Evaluación de la salida en la tarde
-    if (asistencia.salidaTarde) {
-      const salidaTarde = moment(asistencia.salidaTarde, "HH:mm:ss");
-      const salidaPermitidaTarde = moment(HORARIO.tarde.salidaPermitida, "HH:mm");
-      if (salidaTarde.isBefore(salidaPermitidaTarde)) {
-        const minutosFaltantes = salidaPermitidaTarde.diff(salidaTarde, "minutes");
-        if (minutosFaltantes > 5) {
-          const descuento = (minutosFaltantes / 60) * descuentoPorHora;
-          asistencia.descuento += descuento;
+      } else {
+        const entradaTarde = moment(asistencia.tarde, "HH:mm:ss");
+        // Si la primera marcación en la tarde es después de las 19:00, se considera presente
+        if (entradaTarde.isAfter(moment("19:00", "HH:mm"))) {
+          asistencia.estadoT = "Presente";
           asistencia.detalles.push(
-            `Salió ${minutosFaltantes} min antes de las ${HORARIO.tarde.salidaPermitida} - Descuento S/. ${descuento.toFixed(2)}`
+            `Marcación en la tarde posterior a las 19:00 (${asistencia.tarde}) - Se consideró Presente`
           );
+        }
+        // Dentro de tolerancia: sin penalidad
+        else if (entradaTarde.isSameOrBefore(moment(HORARIO.tarde.tolerancia, "HH:mm"))) {
+          // A tiempo, sin descuento
+        }
+        // Primera tardanza: entre 15:09 y 16:29
+        else if (
+          entradaTarde.isBetween(
+            moment(HORARIO.tarde.tardanza1Inicio, "HH:mm"),
+            moment(HORARIO.tarde.tardanza1Fin, "HH:mm"),
+            null,
+            "[]"
+          )
+        ) {
+          asistencia.estadoT = "Tardanza";
+          asistencia.descuento += 5;
+          asistencia.detalles.push(
+            `Llegó tarde en la tarde (${asistencia.tarde}) - Descuento S/. 5.00`
+          );
+        }
+        // Segunda tardanza: entre 16:30 y 17:30
+        else if (
+          entradaTarde.isBetween(
+            moment(HORARIO.tarde.tardanza2Inicio, "HH:mm"),
+            moment(HORARIO.tarde.tardanza2Fin, "HH:mm"),
+            null,
+            "[]"
+          )
+        ) {
+          asistencia.estadoT = "Tardanza grave";
+          asistencia.descuento += 10;
+          asistencia.detalles.push(
+            `Llegó muy tarde en la tarde (${asistencia.tarde}) - Descuento S/. 10.00`
+          );
+        }
+        // Si llega a las 17:31 o más, se marca como ausente
+        else if (
+          entradaTarde.isSameOrAfter(moment(HORARIO.tarde.ausencia, "HH:mm"))
+        ) {
+          asistencia.estadoT = "Ausente";
+          asistencia.descuento += descuentoMediaJornada;
+          asistencia.detalles.push(
+            `Llegó después de las ${HORARIO.tarde.ausencia} (${asistencia.tarde}) - Se consideró Ausente - Descuento S/. ${descuentoMediaJornada.toFixed(2)}`
+          );
+        }
+
+        // D) Evaluación de la salida en la tarde
+        if (asistencia.salidaTarde) {
+          const salidaTarde = moment(asistencia.salidaTarde, "HH:mm:ss");
+          const salidaPermitidaTarde = moment(HORARIO.tarde.salidaPermitida, "HH:mm");
+          if (salidaTarde.isBefore(salidaPermitidaTarde)) {
+            const minutosFaltantes = salidaPermitidaTarde.diff(salidaTarde, "minutes");
+            if (minutosFaltantes > 5) {
+              const descuento = (minutosFaltantes / 60) * descuentoPorHora;
+              asistencia.descuento += descuento;
+              asistencia.detalles.push(
+                `Salió ${minutosFaltantes} min antes de las ${HORARIO.tarde.salidaPermitida} - Descuento S/. ${descuento.toFixed(2)}`
+              );
+            }
+          }
         }
       }
     }
